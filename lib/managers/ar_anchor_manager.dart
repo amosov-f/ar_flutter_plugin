@@ -37,6 +37,13 @@ class ARAnchorManager {
     _channel.invokeMethod<bool>('initGoogleCloudAnchorMode', {});
   }
 
+  /// Activates geospatial mode
+  initGeospatialMode(String apiKey) async {
+    _channel.invokeMethod<bool>('initGeospatialMode', {
+      "apiKey": apiKey,
+    });
+  }
+
   Future<dynamic> _platformCallHandler(MethodCall call) async {
     if (debug) {
       print('_platformCallHandler call ${call.method} ${call.arguments}');

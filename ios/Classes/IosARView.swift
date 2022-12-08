@@ -4,6 +4,29 @@ import Foundation
 import ARKit
 import Combine
 import ARCoreCloudAnchors
+import ARCoreGeospatial
+
+enum TerrainAnchorPlaceError: Error {
+    case sessionNotSetup
+    case earthNotSetup
+    case earthNotTracking
+    case noCameraTransform
+}
+
+extension TerrainAnchorPlaceError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .sessionNotSetup:
+            return "ArCore session should be initialized"
+        case .earthNotSetup:
+            return "GarEarth not set up"
+        case .earthNotTracking:
+            return "GarEarth no tracking"
+        case .noCameraTransform:
+            return "No GarEarth camera transform"
+        }
+    }
+}
 
 class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureRecognizerDelegate, ARSessionDelegate {
     let sceneView: ARSCNView
@@ -18,6 +41,9 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
     
     var cancellableCollection = Set<AnyCancellable>() //Used to store all cancellables in (needed for working with Futures)
     var anchorCollection = [String: ARAnchor]() //Used to bookkeep all anchors created by Flutter calls
+    var garAnchorCollection = [String: GARAnchor]() //Used to bookkeep all geospatial anchors created by Flutter calls
+    var trackedNodes = [UUID: SCNNode]()
+    var garFrame: GARFrame? = nil
     
     private var cloudAnchorHandler: CloudAnchorHandler? = nil
     private var arcoreSession: GARSession? = nil
@@ -50,6 +76,8 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
         super.init()
 
         let configuration = ARWorldTrackingConfiguration() // Create default configuration before initializeARView is called
+        configuration.worldAlignment = .gravity
+        configuration.planeDetection = .horizontal
         self.sceneView.delegate = self
         self.coachingView.delegate = self
         self.sceneView.session.run(configuration)
@@ -169,6 +197,23 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                         }
                         result(false)
                         break
+                    case 1: //Terrain Anchor
+                        if let name = arguments!["name"] as? String,
+                            let latitide = arguments!["latitude"] as? Double,
+                            let longitude = arguments!["longitude"] as? Double,
+                            let altitude = arguments!["altitude"] as? Double
+                        {
+                            let coordinates = CLLocationCoordinate2D(latitude: latitide, longitude: longitude)
+                            do {
+                                try addTerrainAnchor(name: name, coordinate: coordinates, altitudeAboveTerrain: altitude)
+                                result(true)
+                            } catch let error {
+                                sessionManagerChannel.invokeMethod("onError", arguments: ["Can't create terrain anchor: \(error.localizedDescription)"])
+                                result(false)
+                            }
+                        }
+                        result(false)
+                        break
                     default:
                         result(false)
                     
@@ -204,6 +249,31 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                 }
                     
                 break
+            case "initGeospatialMode":
+                guard let apiKey = arguments!["apiKey"] as? String else {
+                    sessionManagerChannel.invokeMethod("onError", arguments: ["Geospatial Mode required API key"])
+                    return
+                }
+            
+                do {
+                    arcoreSession = try GARSession(apiKey: apiKey, bundleIdentifier: nil)
+                    
+                    guard arcoreSession?.isGeospatialModeSupported(GARGeospatialMode.enabled) ?? false else {
+                        sessionManagerChannel.invokeMethod("onError", arguments: ["Geospatial mode is't supported"])
+                        return
+                    }
+                    
+                    
+                    let configuration = GARSessionConfiguration();
+                    configuration.geospatialMode = .enabled;
+                    arcoreSession?.setConfiguration(configuration, error: nil)
+                    
+                    arcoreMode = true
+                } catch let error {
+                    sessionManagerChannel.invokeMethod("onError", arguments: ["Error initializing Google AR Session: \(error.localizedDescription)"])
+                }
+                    
+                break
             case "uploadAnchor":
                 if let anchorName = arguments!["name"] as? String, let anchor = anchorCollection[anchorName] {
                     print("---------------- HOSTING INITIATED ------------------")
@@ -231,6 +301,7 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
         // Set plane detection configuration
         self.configuration = ARWorldTrackingConfiguration()
         self.configuration.environmentTexturing = .automatic
+        configuration.worldAlignment = .gravity
         if let planeDetectionConfig = arguments["planeDetectionConfig"] as? Int {
             switch planeDetectionConfig {
                 case 1: 
@@ -366,7 +437,20 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         if (arcoreMode) {
             do {
-                try arcoreSession!.update(frame)
+                let garFrame = try arcoreSession!.update(frame)
+                self.garFrame = garFrame
+                for anchor in garFrame.updatedAnchors {
+                    if garFrame.earth?.earthState != GAREarthState.enabled {
+                        continue
+                    }
+                    if anchor.trackingState != .tracking {
+                        continue
+                    }
+                    
+                    if let node = trackedNodes[anchor.identifier] {
+                        node.simdTransform = anchor.transform
+                    }
+                }
             } catch {
                 print(error)
             }
@@ -393,6 +477,8 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                                     } else {
                                         promise(.success(false))
                                     }
+                                case 1: // TerrainAnchor
+                                    promise(.success(self.addNodeIfAbsent(name: anchorName, node: node)))
                                 default:
                                     promise(.success(false))
                                 }
@@ -425,6 +511,8 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                                         } else {
                                             promise(.success(false))
                                         }
+                                    case 1: // TerrainAnchor
+                                        promise(.success(self.addNodeIfAbsent(name: anchorName, node: node)))
                                     default:
                                         promise(.success(false))
                                     }
@@ -459,6 +547,8 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                                     } else {
                                         promise(.success(false))
                                     }
+                                case 1: // TerrainAnchor
+                                    promise(.success(self.addNodeIfAbsent(name: anchorName, node: node)))
                                 default:
                                     promise(.success(false))
                                 }
@@ -492,6 +582,8 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                                     } else {
                                         promise(.success(false))
                                     }
+                                case 1: // TerrainAnchor
+                                    promise(.success(self.addNodeIfAbsent(name: anchorName, node: node)))
                                 default:
                                     promise(.success(false))
                                 }
@@ -512,6 +604,15 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
             }
             
         }
+    }
+    
+    func addNodeIfAbsent(name: String, node: SCNNode) -> Bool {
+        if let anchor = self.garAnchorCollection[name]{
+            trackedNodes[anchor.identifier] = node
+            sceneView.scene.rootNode.addChildNode(node)
+            return true
+        }
+        return false
     }
     
     func transformNode(name: String, transform: Array<NSNumber>) {
@@ -694,6 +795,31 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
             usleep(1) // wait 1 millionth of a second
         }
     }
+
+    func addTerrainAnchor(name: String, coordinate: CLLocationCoordinate2D, altitudeAboveTerrain: CLLocationDistance) throws {
+        guard let session = arcoreSession else {
+            throw TerrainAnchorPlaceError.sessionNotSetup
+        }
+        
+        
+        guard let earth = garFrame?.earth else {
+            throw TerrainAnchorPlaceError.earthNotSetup
+        }
+        
+        let earthTracking = earth.trackingState
+        guard earthTracking == GARTrackingState.tracking else {
+            throw TerrainAnchorPlaceError.earthNotTracking
+        }
+        
+        guard let t = earth.cameraGeospatialTransform else {
+            throw TerrainAnchorPlaceError.noCameraTransform
+        }
+        
+        
+        let garAnchor = try session.createAnchorOnTerrain(coordinate: coordinate, altitudeAboveTerrain: altitudeAboveTerrain, eastUpSouthQAnchor: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1))
+        
+        garAnchorCollection[name] = garAnchor
+    }
     
     func deleteAnchor(anchorName: String) {
         if let anchor = anchorCollection[anchorName]{
@@ -705,6 +831,12 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
             sceneView.session.remove(anchor: anchor)
             // Update bookkeeping
             anchorCollection.removeValue(forKey: anchorName)
+        }
+        if let anchor = garAnchorCollection[anchorName]{
+            if let node = trackedNodes.removeValue(forKey: anchor.identifier) {
+                node.removeFromParentNode()
+            }
+            garAnchorCollection.removeValue(forKey: anchorName)
         }
     }
     

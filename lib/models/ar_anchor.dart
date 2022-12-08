@@ -1,5 +1,4 @@
 import 'package:ar_flutter_plugin/datatypes/anchor_types.dart';
-import 'package:ar_flutter_plugin/models/ar_node.dart';
 import 'package:ar_flutter_plugin/utils/json_converters.dart';
 import 'package:vector_math/vector_math_64.dart';
 import 'package:flutter/widgets.dart';
@@ -8,7 +7,6 @@ import 'package:flutter/widgets.dart';
 abstract class ARAnchor {
   ARAnchor({
     required this.type,
-    required this.transformation,
     String? name,
   }) : name = name ?? UniqueKey().toString();
 
@@ -29,9 +27,6 @@ abstract class ARAnchor {
     return ARUnkownAnchor.fromJson(arguments);
   }
 
-  /// Defines the anchor’s rotation, translation and scale in world coordinates.
-  final Matrix4 transformation;
-
   /// Serializes an [ARAnchor]
   Map<String, dynamic> toJson();
 }
@@ -39,7 +34,7 @@ abstract class ARAnchor {
 /// An [ARAnchor] fixed to a tracked plane
 class ARPlaneAnchor extends ARAnchor {
   ARPlaneAnchor({
-    required Matrix4 transformation,
+    required this.transformation,
     String? name,
     List<String>? childNodes,
     String? cloudanchorid,
@@ -48,7 +43,10 @@ class ARPlaneAnchor extends ARAnchor {
         cloudanchorid = cloudanchorid ?? null,
         ttl = ttl ?? 1,
         super(
-            type: AnchorType.plane, transformation: transformation, name: name);
+            type: AnchorType.plane, name: name);
+
+  /// Defines the anchor’s rotation, translation and scale in world coordinates.
+  final Matrix4 transformation;
 
   /// Names of ARNodes attached to this [APlaneRAnchor]
   List<String> childNodes;
@@ -93,11 +91,47 @@ Map<String, dynamic> aRPlaneAnchorToJson(ARPlaneAnchor instance) {
   };
 }
 
+class ARTerrainAnchor extends ARAnchor {
+  final double latitude;
+  final double longitude;
+  final double altitude;
+
+  ARTerrainAnchor({String? name, required this.latitude, required this.longitude, required this.altitude}) : super(type: AnchorType.terrain, name: name);
+
+  static ARTerrainAnchor fromJson(Map<String, dynamic> json) =>
+      aRTerrainAnchorFromJson(json);
+
+  @override
+  Map<String, dynamic> toJson() => aRTerrainAnchorToJson(this);
+}
+
+ARTerrainAnchor aRTerrainAnchorFromJson(Map<String, dynamic> json) {
+  return ARTerrainAnchor(
+    name: json['name'] as String,
+    latitude: json['latitude'],
+    longitude: json['longitude'],
+    altitude: json['altitude']
+  );
+}
+
+Map<String, dynamic> aRTerrainAnchorToJson(ARTerrainAnchor instance) {
+  return {
+    'type': instance.type.index,
+    'name': instance.name,
+    'latitude': instance.latitude,
+    'longitude': instance.longitude,
+    'altitude': instance.altitude,
+  };
+}
+
 /// An [ARAnchor] type that is not supported yet
 class ARUnkownAnchor extends ARAnchor {
+  /// Defines the anchor’s rotation, translation and scale in world coordinates.
+  final Matrix4 transformation;
+
   ARUnkownAnchor(
-      {required AnchorType type, required Matrix4 transformation, String? name})
-      : super(type: type, transformation: transformation, name: name);
+      {required AnchorType type, required this.transformation, String? name})
+      : super(type: type, name: name);
 
   static ARUnkownAnchor fromJson(Map<String, dynamic> json) =>
       aRUnkownAnchorFromJson(json);

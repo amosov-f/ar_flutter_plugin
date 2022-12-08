@@ -1,4 +1,5 @@
 import 'package:ar_flutter_plugin_example/examples/externalmodelmanagementexample.dart';
+import 'package:ar_flutter_plugin_example/examples/geospatialanchorexample.dart';
 import 'package:ar_flutter_plugin_example/examples/objectsonplanesexample.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -117,7 +118,14 @@ class ExampleList extends StatelessWidget {
           () => Navigator.push(
               context,
               MaterialPageRoute(
-                  builder: (context) => ExternalModelManagementWidget())))
+                  builder: (context) => ExternalModelManagementWidget()))),
+      Example(
+          'Geospatial Anchors',
+          'Geospatial API Example',
+              () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => GeospatialAnchorWidget()))),
     ];
     return ListView(
       children:
