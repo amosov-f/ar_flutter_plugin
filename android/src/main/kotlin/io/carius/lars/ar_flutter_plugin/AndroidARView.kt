@@ -173,7 +173,7 @@ internal class AndroidARView(
                                 }
                             }
                         }
-                        "addNodeToPlaneAnchor" -> {
+                        "addNodeToAnchor" -> {
                             val dict_node: HashMap<String, Any>? = call.argument<HashMap<String, Any>>("node")
                             val dict_anchor: HashMap<String, Any>? = call.argument<HashMap<String, Any>>("anchor")
                             if (dict_node != null && dict_anchor != null) {

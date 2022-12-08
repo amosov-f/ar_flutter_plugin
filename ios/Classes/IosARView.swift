@@ -155,7 +155,7 @@ class IosARView: NSObject, FlutterPlatformView, ARSCNViewDelegate, UIGestureReco
                        result(val)
                     }).store(in: &self.cancellableCollection)
                 break
-            case "addNodeToPlaneAnchor":
+            case "addNodeToAnchor":
                 if let dict_node = arguments!["node"] as? Dictionary<String, Any>, let dict_anchor = arguments!["anchor"] as? Dictionary<String, Any> {
                     addNode(dict_node: dict_node, dict_anchor: dict_anchor).sink(receiveCompletion: {completion in }, receiveValue: { val in
                            result(val)
